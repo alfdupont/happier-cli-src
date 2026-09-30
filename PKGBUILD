@@ -1,7 +1,7 @@
 # Maintainer: zhaole_lv
 pkgname=happier-cli
-pkgver=0.2.12
-pkgrel=2
+pkgver=0.2.14
+pkgrel=1
 pkgdesc="Open-source companion for AI coding agents (Claude Code, Codex, OpenCode, etc.)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/happier-dev/happier"
@@ -12,7 +12,6 @@ license=('MIT')
 options=('!strip')
 optdepends=(
     'ripgrep: file search (bundled fallback included)'
-    'difftastic: structural diff (bundled fallback included)'
 )
 
 # Pin the immutable per-version tag: the rolling cli-stable tag only hosts the
@@ -22,13 +21,13 @@ _base="https://github.com/happier-dev/happier/releases/download/${_tag}"
 
 # Local patches, applied to the extracted release tree in prepare().
 source=('copilot-per-model-reasoning-effort.patch')
-sha256sums=('2ff7db4acb615b139a25496696b5b05f73374a8e9d028125ed478d48cac8d66b')
+sha256sums=('0714612ec345eb546acd8721169d966e7bd7a0bdc46908911256c2dd4723f892')
 source_x86_64=(
     "${_base}/happier-v${pkgver}-linux-x64.tar.gz"
     "https://raw.githubusercontent.com/happier-dev/happier/cli-v${pkgver}/LICENCE"
 )
 sha256sums_x86_64=(
-    '8978265ce7677bd3f0a0f2f734304bb551452c962b7d46f8f34420892a01fa7e'
+    'b8b290abc8080362b3f518590adfb961246815e55850811c8b6a46a041acce45'
     'e251d0448ef3ce023c20ebac9b90a7d8642b1434825838247d6e457668eb3e00'
 )
 source_aarch64=(
@@ -36,7 +35,7 @@ source_aarch64=(
     "https://raw.githubusercontent.com/happier-dev/happier/cli-v${pkgver}/LICENCE"
 )
 sha256sums_aarch64=(
-    'bfa15e2aa79a6dbd0a714c7e0a6d51be011a43ddde2f4f453d6458b15b430e82'
+    'b1c39cfe96474b06adfd28caf91f5831b802c097c6848ebad80d1575493abc8f'
     'e251d0448ef3ce023c20ebac9b90a7d8642b1434825838247d6e457668eb3e00'
 )
 
@@ -63,8 +62,10 @@ package() {
 
     # The release archive is a self-contained app tree: a native ELF launcher
     # plus its bundled node runtime (node_modules/), application code
-    # (package-dist/), helper scripts and pre-unpacked tools (rg, difft,
-    # zellij). Install the tree whole under /opt and expose it in PATH.
+    # (package-dist/), helper scripts and pre-unpacked tools (rg, zellij).
+    # Install the tree whole under /opt and expose it in PATH. Since 0.2.14,
+    # happier downloads its optional runtimes (difftastic, local embeddings)
+    # into ~/.happier on first use instead of bundling them.
     install -d "${pkgdir}/opt/${pkgname}"
     cp -a "${srcdir}/happier-v${pkgver}-linux-${_arch}/." "${pkgdir}/opt/${pkgname}/"
 

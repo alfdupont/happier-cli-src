@@ -15,9 +15,9 @@ optdepends=(
     'difftastic: structural diff (bundled fallback included)'
 )
 
-# cli-stable is the rolling stable channel; swap to "cli-v${pkgver}" for an
-# immutable tag hosting the same assets.
-_tag=cli-stable
+# Pin the immutable per-version tag: the rolling cli-stable tag only hosts the
+# latest release's assets, so its URLs break as soon as upstream moves on.
+_tag="cli-v${pkgver}"
 _base="https://github.com/happier-dev/happier/releases/download/${_tag}"
 
 source_x86_64=(

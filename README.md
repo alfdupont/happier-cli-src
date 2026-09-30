@@ -26,7 +26,7 @@ This private fork patches the release tree in `prepare()` before installing it:
   bug and the backported fix.
 
 The patch edits bundled `package-dist` chunks whose file names are content
-hashes, so it only applies to 0.2.12. When bumping `pkgver`, port it to the
+hashes, so it only applies to 0.2.14. When bumping `pkgver`, port it to the
 new chunks, or drop it once upstream ships the fix. `--fuzz=0` makes the build
 fail instead of patching the wrong code.
 

@@ -17,6 +17,27 @@ Main files:
 - `PKGBUILD`
 - `.SRCINFO`
 
+## Local Patches
+
+This private fork patches the release tree in `prepare()` before installing it:
+
+- `copilot-per-model-reasoning-effort.patch`: lets the model picker offer a
+  reasoning-effort choice for GitHub Copilot models. Its header explains the
+  bug and the backported fix.
+
+The patch edits bundled `package-dist` chunks whose file names are content
+hashes, so it only applies to 0.2.12. When bumping `pkgver`, port it to the
+new chunks, or drop it once upstream ships the fix. `--fuzz=0` makes the build
+fail instead of patching the wrong code.
+
+After installing, restart the daemon so it loads the patched code:
+
+```bash
+systemctl --user restart happier-daemon.default.service
+```
+
+The `aur` remote points at the public AUR package. Don't push this fork there.
+
 ## Update Workflow
 
 When upstream releases a new version:

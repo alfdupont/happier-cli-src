@@ -1,7 +1,7 @@
 pkgbase = happier-cli
 	pkgdesc = Open-source companion for AI coding agents (Claude Code, Codex, OpenCode, etc.)
 	pkgver = 0.2.12
-	pkgrel = 1
+	pkgrel = 2
 	url = https://github.com/happier-dev/happier
 	arch = x86_64
 	arch = aarch64
@@ -9,6 +9,8 @@ pkgbase = happier-cli
 	optdepends = ripgrep: file search (bundled fallback included)
 	optdepends = difftastic: structural diff (bundled fallback included)
 	options = !strip
+	source = copilot-per-model-reasoning-effort.patch
+	sha256sums = 2ff7db4acb615b139a25496696b5b05f73374a8e9d028125ed478d48cac8d66b
 	source_x86_64 = https://github.com/happier-dev/happier/releases/download/cli-v0.2.12/happier-v0.2.12-linux-x64.tar.gz
 	source_x86_64 = https://raw.githubusercontent.com/happier-dev/happier/cli-v0.2.12/LICENCE
 	sha256sums_x86_64 = 8978265ce7677bd3f0a0f2f734304bb551452c962b7d46f8f34420892a01fa7e

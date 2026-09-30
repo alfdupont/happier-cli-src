@@ -5,3 +5,7 @@ src/
 *.log
 *.tgz
 *.tgz.part
+# Release sources makepkg downloads next to the PKGBUILD
+*.tar.gz
+*.tar.gz.part
+/LICENCE

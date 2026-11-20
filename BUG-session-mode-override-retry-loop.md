@@ -130,3 +130,17 @@ grep -o '"attempt":[0-9]*' "$L" | tail -1
 ```
 
 Any process whose rate stays flat for minutes while its session is idle, or any `attempt` counter above ~50, indicates this defect.
+
+## Follow-up (2026-11-20): the metadata write storm behind the loop
+
+`session-mode-override-retry-backoff.patch` stopped the retries, but resuming the session from the 2026-11-20 incident still produced ~3 MB/s. The resumed Copilot process logged only one rejected attempt, yet uploaded ~676 KB/s to the relay, which forwarded ~0.7 MB/s to every connected client.
+
+Inspecting the live process with the Node inspector showed:
+
+- About 18 `update-metadata` socket writes per second, each ~37.5 KB of encrypted metadata.
+- 438,153 writes waiting behind the session's metadata lock, enough for about 6.7 hours.
+- Every queued write came from the ACP runtime's `current_mode_update` handler, which rewrites `sessionModesV1` with a fresh `Date.now()` even when the mode is unchanged.
+
+This was also the wake source of the original loop. Each rejected mode change made Copilot emit a `current_mode_update`, whose metadata write bumped the version and woke the session for another attempt. Copilot keeps those notifications in its session history, so resuming the session replays them all.
+
+`acp-mode-metadata-write-storm.patch` makes the mode handlers leave unchanged metadata alone, skips runtime publications that change nothing, and coalesces queued runtime publications into one write. A session already poisoned by the loop can then be resumed safely.

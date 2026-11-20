@@ -29,6 +29,10 @@ This private fork patches the release tree in `prepare()` before installing it:
   allowed modes) from being retried on every metadata sync, which saturated
   the link while the session was idle. See
   `BUG-session-mode-override-retry-loop.md` for the investigation.
+- `acp-mode-metadata-write-storm.patch`: stops repeated ACP mode notifications
+  from queueing one full session metadata write each. Without it, resuming a
+  session that went through the retry loop above replays hundreds of thousands
+  of notifications and floods the relay for hours. It must be applied last.
 
 The patches edit bundled `package-dist` chunks whose file names are content hashes, so they currently apply to 0.2.20. When bumping `pkgver`, port them to the new chunks or drop them once upstream ships the fixes. `--fuzz=0` makes the build fail instead of patching the wrong code.
 

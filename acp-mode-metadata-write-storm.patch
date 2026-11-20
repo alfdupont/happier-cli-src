@@ -1,0 +1,116 @@
+Stop provider mode notifications from flooding the session with metadata writes.
+
+Each current_mode_update or session_modes_state notification from an ACP agent queued a
+full session metadata write stamped with Date.now(), even when the mode had not changed.
+During the session mode override retry loop, Copilot answered every rejected mode change
+with such a notification, and stored them in its session history. Resuming that session
+replayed them: 438,153 queued writes of about 37.5 KB each, draining at 18 per second, which
+the relay then fanned out to every connected client for hours.
+
+This patch ports the fork's fix to the bundled CLI 0.2.20 package:
+- The two mode handlers return the metadata unchanged when the provider repeats the
+  published modes.
+- A runtime publication that would not change the current metadata is not queued.
+- While one runtime publication waits in the session write queue, later ones join it and
+  are applied in order when it runs, so a burst costs one write. A reset starts a fresh
+  batch, and a write that fails before running releases it.
+- updateMetadataBestEffort returns its promise so the runtime can release the batch.
+
+Apply from the extracted release root with patch -p1 --fuzz=0, after
+copilot-per-model-reasoning-effort.patch and session-mode-override-retry-backoff.patch.
+The content-addressed chunk names and hunks are specific to cli-v0.2.20.
+
+Adapted from the fork's apps/cli/src/agent/acp/runtime/createAcpRuntime.ts and
+apps/cli/src/api/session/sessionWritesBestEffort.ts.
+
+--- a/package-dist/api-C6NpPUiK.mjs
++++ b/package-dist/api-C6NpPUiK.mjs
+@@ -73202,11 +73202,12 @@
+ function updateMetadataBestEffort(session, updater, logPrefix, reason) {
+   try {
+     const result = session.updateMetadata(updater);
+-    void Promise.resolve(result).catch((error) => {
++    return Promise.resolve(result).catch((error) => {
+       logBestEffortWriteFailure(`${logPrefix} Failed to update session metadata (${reason}) (non-fatal)`, error);
+     });
+   } catch (error) {
+     logBestEffortWriteFailure(`${logPrefix} Failed to update session metadata (${reason}) (non-fatal)`, error);
++    return Promise.resolve();
+   }
+ }
+ 
+--- a/package-dist/createAcpRuntime-DKq1SnV2.mjs
++++ b/package-dist/createAcpRuntime-DKq1SnV2.mjs
+@@ -793,6 +793,7 @@
+   let stopObservingProviderTurnEvents = null;
+   let sessionId = null;
+   let runtimeMetadataPublicationGeneration = 0;
++  let pendingRuntimeMetadataPublication = null;
+   let pendingProviderSessionInfo = null;
+   const createTurnState = () => ({
+     modelOutputState: { turnText: "", segmentText: "" },
+@@ -1521,13 +1522,36 @@
+     return { assistantText: turn.modelOutputState.turnText || null };
+   };
+   const publishRuntimeMetadataBestEffort = (updater, reason) => {
+-    const publicationGeneration = runtimeMetadataPublicationGeneration;
+-    updateMetadataBestEffort(
++    const entry = { generation: runtimeMetadataPublicationGeneration, updater };
++    const queued = pendingRuntimeMetadataPublication;
++    if (queued) {
++      queued.updaters.push(entry);
++      return;
++    }
++    const snapshot = params.session.getMetadataSnapshot?.() ?? null;
++    if (snapshot && updater(snapshot) === snapshot) return;
++    const publication = { updaters: [entry] };
++    pendingRuntimeMetadataPublication = publication;
++    const release = () => {
++      if (pendingRuntimeMetadataPublication === publication) pendingRuntimeMetadataPublication = null;
++    };
++    void updateMetadataBestEffort(
+       params.session,
+-      (metadata) => publicationGeneration === runtimeMetadataPublicationGeneration ? updater(metadata) : metadata,
++      (metadata) => {
++        release();
++        let next = metadata;
++        for (const { generation, updater: apply } of publication.updaters) {
++          if (generation === runtimeMetadataPublicationGeneration) next = apply(next);
++        }
++        return next;
++      },
+       `[${params.provider}]`,
+       reason
+-    );
++    ).finally(release);
++  };
++  const isPublishedSessionModesCurrent = (metadata, currentModeId, availableModes) => {
++    const published = metadata.sessionModesV1;
++    return published?.provider === params.provider && published.currentModeId === currentModeId && (availableModes === void 0 || isDeepStrictEqual(published.availableModes, availableModes)) && isDeepStrictEqual(metadata.acpSessionModesV1, published);
+   };
+   const publishProviderSessionInfo = (update, observedAt) => {
+     const providerSessionId = sessionId;
+@@ -1917,6 +1941,7 @@
+               if (currentModeId && availableModes.length > 0) {
+                 publishRuntimeMetadataBestEffort(
+                   (metadata) => {
++                    if (isPublishedSessionModesCurrent(metadata, currentModeId, availableModes)) return metadata;
+                     const sessionModes = {
+                       v: 1,
+                       provider: params.provider,
+@@ -2039,6 +2064,7 @@
+               if (currentModeId) {
+                 publishRuntimeMetadataBestEffort(
+                   (metadata) => {
++                    if (isPublishedSessionModesCurrent(metadata, currentModeId)) return metadata;
+                     const prev = metadata.sessionModesV1 ?? metadata.acpSessionModesV1;
+                     const availableModes = Array.isArray(prev?.availableModes) ? prev.availableModes : [];
+                     const sessionModes = {
+@@ -2418,6 +2444,7 @@
+         runtimeGeneration += 1;
+         hostCallerTurn = null;
+         runtimeMetadataPublicationGeneration += 1;
++        pendingRuntimeMetadataPublication = null;
+         const identityReset = identityBinding.reset();
+         startupDrainController?.abort("acp-runtime:generation-reset");
+         postStartDrainController?.abort("acp-runtime:generation-reset");

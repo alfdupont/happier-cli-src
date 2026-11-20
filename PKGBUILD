@@ -1,7 +1,7 @@
 # Maintainer: zhaole_lv
 pkgname=happier-cli
 pkgver=0.2.20
-pkgrel=2
+pkgrel=3
 pkgdesc="Open-source companion for AI coding agents (Claude Code, Codex, OpenCode, etc.)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/happier-dev/happier"
@@ -23,10 +23,12 @@ _base="https://github.com/happier-dev/happier/releases/download/${_tag}"
 source=(
     'copilot-per-model-reasoning-effort.patch'
     'session-mode-override-retry-backoff.patch'
+    'acp-mode-metadata-write-storm.patch'
 )
 sha256sums=(
     '8ae18a890afea27cc95e347efd6ba7a5185db83fbc9b14db5149b598d87c547c'
     'e765f38d5a9609786482c2c111d522d004937a20e418d7b712b988bbb560d385'
+    '220ba34e6b506597b760abee724b289125865a34aca80d467d478edc8c06bee1'
 )
 source_x86_64=(
     "${_base}/happier-v${pkgver}-linux-x64.tar.gz"
@@ -63,6 +65,12 @@ prepare() {
     # above, it targets a content-hashed chunk and must be ported per pkgver.
     patch --directory="${srcdir}/happier-v${pkgver}-linux-${_arch}" --forward \
         --strip=1 --fuzz=0 --input="${srcdir}/session-mode-override-retry-backoff.patch"
+
+    # Stop repeated ACP mode notifications (such as a resumed session replaying
+    # its history) from queueing one full metadata write each. It builds on the
+    # chunks the patches above leave, so it must stay last.
+    patch --directory="${srcdir}/happier-v${pkgver}-linux-${_arch}" --forward \
+        --strip=1 --fuzz=0 --input="${srcdir}/acp-mode-metadata-write-storm.patch"
 }
 
 package() {

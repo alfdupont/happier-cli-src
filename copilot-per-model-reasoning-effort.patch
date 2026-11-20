@@ -1,68 +1,21 @@
-Expose Copilot's per-model reasoning effort in the model picker
+Backport Copilot per-model reasoning effort discovery to the bundled CLI 0.2.20 package.
 
-Port of alfdupont/happier commit 1b8e2a307e ("fix(cli): expose Copilot's
-per-model reasoning effort in the model picker") to the bundled
-package-dist of the happier-cli 0.2.14 release. Apply from the root of the
-extracted release tree with `patch -p1`.
+The released probe observes model-scoped ACP options only for the session's current model. The fork's canonical probe and Copilot catalog mark this provider as per-model; this patch adapts those behaviors to the compiled release chunks so the model picker sees each observed Copilot model's valid effort choices.
 
-The preflight model probe returned ACP-listed models as soon as the agent
-reported a `models` list. That dropped the model-scoped config options (such
-as `reasoning_effort`), so the new-session picker showed no effort control
-for any Copilot model. ACP reports those options only for the session's
-current model, and Copilot's effort levels differ per model, so for agents
-that declare `acpModelOptionsScope: "per_model"` the probe selects each
-listed model on its disposable probe session and records that model's
-options, within the probe's existing deadline.
+Apply from the extracted release root with patch -p1 --fuzz=0. The content-addressed chunk names and hunks are specific to cli-v0.2.20.
 
-- withMcpTimeout-*.mjs (bundled @happier-dev/agents): Copilot declares
-  `acpModelOptionsScope: "per_model"`.
-- api-*.mjs (bundled agentModelsProbe): attach the session's model-scoped
-  options to models from either source, and walk per-model agents' models.
+Adapted from the fork's apps/cli/src/capabilities/probes/agentModelsProbe.ts and packages/agents/src/models.ts.
 
-The probe source in 0.2.14 is identical to the commit's parent, so this is a
-line-for-line translation of the commit into the bundled JavaScript.
-
-diff --git a/package-dist/api-xTIAcnds.mjs b/package-dist/api-xTIAcnds.mjs
-index 5aabacf..8942374 100644
---- a/package-dist/api-xTIAcnds.mjs
-+++ b/package-dist/api-xTIAcnds.mjs
-@@ -55940,23 +55940,27 @@ async function probeModelsFromCliModelsCommand(params) {
-     });
-   });
+--- a/package-dist/api-C6NpPUiK.mjs
++++ b/package-dist/api-C6NpPUiK.mjs
+@@ -73602,34 +73602,139 @@
+   const observedOptions = configOptions.filter((option) => option !== selector && isAcpModelScopedConfigOption(option)).map(normalizeProbeModelOption).filter((option) => option !== null);
+   return applyObservedAcpModelOptions(models, observedModelId, observedOptions);
  }
-+function readProbeConfigOptions(configOptionsRaw) {
-+  if (!Array.isArray(configOptionsRaw)) return [];
-+  return configOptionsRaw.map((optionRaw) => ProbeConfigOptionCandidateSchema.safeParse(optionRaw)).filter((parsed2) => parsed2.success).map((parsed2) => parsed2.data);
-+}
 +function readProbeModelScopedOptions(configOptionsRaw) {
-+  return readProbeConfigOptions(configOptionsRaw).filter(isAcpModelScopedConfigOption).map((option) => normalizeProbeModelOption(option)).filter((option) => option !== null);
++  if (!Array.isArray(configOptionsRaw)) return [];
++  return normalizeProbeConfigOptions(configOptionsRaw).filter(isAcpModelScopedConfigOption).map(normalizeProbeModelOption).filter((option) => option !== null);
 +}
- function normalizeModelsFromConfigOptions(configOptionsRaw) {
--  if (!Array.isArray(configOptionsRaw)) return null;
--  const configOptions = configOptionsRaw.map((optionRaw) => ProbeConfigOptionCandidateSchema.safeParse(optionRaw)).filter((parsed2) => parsed2.success).map((parsed2) => parsed2.data);
-+  const configOptions = readProbeConfigOptions(configOptionsRaw);
-   if (configOptions.length === 0) return null;
-   const candidate = configOptions.find(isAcpModelConfigOptionLike) ?? null;
-   if (!candidate) return null;
-   const optionsRaw = candidate.options ?? null;
-   if (!optionsRaw) return null;
--  const modelScopedOptions = configOptions.filter(isAcpModelScopedConfigOption).map((option) => normalizeProbeModelOption(option)).filter((option) => option !== null);
-   const parsed = normalizeAcpConfigOptionChoices(optionsRaw, (value) => {
-     const id = ProbeNonEmptyStringSchema$2.safeParse(value);
-     return id.success ? id.data : null;
-   }).map((choice) => ({
-     id: choice.value,
-     name: choice.name,
--    ...choice.description ? { description: choice.description } : {},
--    ...modelScopedOptions.length > 0 ? { modelOptions: modelScopedOptions } : {}
-+    ...choice.description ? { description: choice.description } : {}
-   }));
-   if (optionsRaw.length > 0 && parsed.length === 0) return null;
-   const withDefault = [
-@@ -55970,34 +55974,97 @@ function normalizeModelsFromConfigOptions(configOptionsRaw) {
-     return true;
-   });
- }
 +function preferSessionStartValues(options, sessionStartOptions) {
 +  return options.map((option) => {
 +    const startOption = sessionStartOptions.find((candidate) => candidate.id === option.id);
@@ -71,45 +24,66 @@ index 5aabacf..8942374 100644
 +  });
 +}
 +async function observeModelScopedOptionsPerModel(params) {
-+  const observed = /* @__PURE__ */ new Map();
++  const observed = new Map();
 +  const { backend, sessionId, modelConfigOptionId } = params;
++  const warnIncomplete = (reason, unobservedModelCount) => {
++    if (unobservedModelCount <= 0) return;
++    logger.warnFile("[agentModelsProbe] Per-model option discovery incomplete", {
++      modelConfigOptionId: modelConfigOptionId ?? null,
++      reason,
++      unobservedModelCount
++    });
++  };
 +  if (!modelConfigOptionId || !backend.setSessionConfigOption || !backend.getSessionConfigOptionsState) {
-+    logger.debug("[agentModelsProbe] Per-model options need a model config option the backend can set; every model keeps the session options");
++    warnIncomplete(
++      "backend-cannot-select-model",
++      params.models.filter((model) => model.id !== "default" && !model.modelOptions).length
++    );
 +    return observed;
 +  }
 +  const sessionConfigOptionsRaw = backend.getSessionConfigOptionsState();
-+  const modelConfigOption = readProbeConfigOptions(sessionConfigOptionsRaw).find((option) => option.id === modelConfigOptionId);
++  const sessionConfigOptions = Array.isArray(sessionConfigOptionsRaw) ? normalizeProbeConfigOptions(sessionConfigOptionsRaw) : [];
++  const modelConfigOption = sessionConfigOptions.find((option) => option.id === modelConfigOptionId);
 +  if (!modelConfigOption) {
-+    logger.debug(`[agentModelsProbe] Session reports no "${modelConfigOptionId}" config option; every model keeps the session options`);
++    warnIncomplete(
++      "model-selector-not-reported",
++      params.models.filter((model) => model.id !== "default" && !model.modelOptions).length
++    );
 +    return observed;
 +  }
 +  const sessionStartOptions = readProbeModelScopedOptions(sessionConfigOptionsRaw);
-+  for (const model of params.models) {
++  const incompleteReasons = /* @__PURE__ */ new Set();
++  let unobservedModelCount = 0;
++  for (let modelIndex = 0; modelIndex < params.models.length; modelIndex += 1) {
++    const model = params.models[modelIndex];
++    params.signal?.throwIfAborted();
 +    if (model.id === "default" || model.id === modelConfigOption.currentValue || model.modelOptions) continue;
 +    const remainingMs = params.deadlineAt - Date.now();
 +    if (remainingMs <= 0) {
-+      logger.debug(`[agentModelsProbe] Probe deadline reached before model "${model.id}"; it and later models keep the session options`);
++      incompleteReasons.add("probe-deadline");
++      unobservedModelCount += params.models.slice(modelIndex).filter((candidate) =>
++        candidate.id !== "default" && candidate.id !== modelConfigOption.currentValue && !candidate.modelOptions
++      ).length;
 +      break;
 +    }
 +    let timerId = null;
 +    const outcome = await Promise.race([
 +      backend.setSessionConfigOption(sessionId, modelConfigOptionId, model.id).then(
 +        () => "selected",
-+        (error) => {
-+          logger.debug(`[agentModelsProbe] Failed to select model "${model.id}" on the probe session; it keeps the session options`, error);
-+          return "failed";
-+        }
++        () => "failed"
 +      ),
 +      new Promise((resolve) => {
 +        timerId = setTimeout(() => resolve("timeout"), remainingMs);
 +      })
 +    ]).finally(() => {
-+      if (timerId !== null) {
-+        clearTimeout(timerId);
-+      }
++      if (timerId !== null) clearTimeout(timerId);
 +    });
++    params.signal?.throwIfAborted();
 +    if (outcome === "timeout") {
-+      logger.debug(`[agentModelsProbe] Probe deadline reached while selecting model "${model.id}"; it and later models keep the session options`);
++      incompleteReasons.add("probe-deadline");
++      unobservedModelCount += params.models.slice(modelIndex).filter((candidate) =>
++        candidate.id !== "default" && candidate.id !== modelConfigOption.currentValue && !candidate.modelOptions
++      ).length;
 +      break;
 +    }
 +    if (outcome === "selected") {
@@ -117,7 +91,13 @@ index 5aabacf..8942374 100644
 +        model.id,
 +        preferSessionStartValues(readProbeModelScopedOptions(backend.getSessionConfigOptionsState()), sessionStartOptions)
 +      );
++    } else {
++      incompleteReasons.add("model-selection-failed");
++      unobservedModelCount += 1;
 +    }
++  }
++  if (incompleteReasons.size > 0) {
++    warnIncomplete([...incompleteReasons].join(","), unobservedModelCount);
 +  }
 +  return observed;
 +}
@@ -135,71 +115,73 @@ index 5aabacf..8942374 100644
 +  const sessionId = await Promise.race([(async () => {
 +    const started = await backend.startSession();
 +    const modelsReady = await backend.waitForSessionModels?.() ?? true;
-+    return modelsReady ? started?.sessionId : null;
++    return modelsReady ? started.sessionId : null;
    })(), timeoutPromise]).finally(() => {
      if (timerId !== null) {
        clearTimeout(timerId);
      }
    });
 -  if (!modelsReady) return null;
--  if (typeof backend.getSessionModelState === "function") {
--    const state = backend.getSessionModelState();
--    const modelsRaw = state?.availableModels;
--    const models = normalizeDynamicModels(modelsRaw);
--    if (models) return models;
--  }
--  if (typeof backend.getSessionConfigOptionsState === "function") {
--    const configOptions = backend.getSessionConfigOptionsState();
--    const models = normalizeModelsFromConfigOptions(configOptions);
--    if (models) return models;
--  }
--  return null;
 +  if (sessionId === null) return null;
-+  const models = normalizeDynamicModels(backend.getSessionModelState?.()?.availableModels) ?? normalizeModelsFromConfigOptions(backend.getSessionConfigOptionsState?.());
-+  if (!models) return null;
-+  const sessionOptions = readProbeModelScopedOptions(backend.getSessionConfigOptionsState?.());
-+  const observedOptions = params.modelConfig?.acpModelOptionsScope === "per_model" ? await observeModelScopedOptionsPerModel({
++  const modelConfigOptionId = params.modelConfig?.acpModelConfigOptionId ?? params.modelConfigOptionId;
+   const configOptions = backend.getSessionConfigOptionsState?.();
++  let models = null;
+   if (typeof backend.getSessionModelState === "function") {
+     const state = backend.getSessionModelState();
+     const modelsRaw = state?.availableModels;
+-    const models = normalizeDynamicModels(modelsRaw);
+-    if (models) return attachObservedModelOptions(models, configOptions, state?.currentModelId, params.modelConfigOptionId);
++    const dynamicModels = normalizeDynamicModels(modelsRaw);
++    if (dynamicModels) models = attachObservedModelOptions(dynamicModels, configOptions, state?.currentModelId, modelConfigOptionId);
+   }
+-  if (typeof backend.getSessionConfigOptionsState === "function") {
+-    const models = normalizeModelsFromConfigOptions(configOptions, params.modelConfigOptionId);
+-    if (models) return attachObservedModelOptions(models, configOptions, void 0, params.modelConfigOptionId);
++  if (!models && typeof backend.getSessionConfigOptionsState === "function") {
++    const configModels = normalizeModelsFromConfigOptions(configOptions, modelConfigOptionId);
++    if (configModels) models = attachObservedModelOptions(configModels, configOptions, void 0, modelConfigOptionId);
+   }
+-  return null;
++  if (!models || params.modelConfig?.acpModelOptionsScope !== "per_model") return models;
++  const observedOptions = await observeModelScopedOptionsPerModel({
 +    backend,
 +    sessionId,
 +    models,
 +    modelConfigOptionId: params.modelConfig.acpModelConfigOptionId,
-+    deadlineAt
-+  }) : /* @__PURE__ */ new Map();
++    deadlineAt,
++    signal: params.signal
++  });
 +  return models.map((model) => {
-+    if (model.id === "default" || model.modelOptions) return model;
-+    const modelOptions = observedOptions.get(model.id) ?? sessionOptions;
-+    return modelOptions.length > 0 ? { ...model, modelOptions } : model;
++    const modelOptions = observedOptions.get(model.id);
++    return modelOptions && modelOptions.length > 0 ? { ...model, modelOptions } : model;
 +  });
  }
  async function probeAgentModelsBestEffort(params) {
    const nowMs = Date.now();
-@@ -56056,7 +56123,7 @@ async function probeAgentModelsBestEffort(params) {
-         processEnv: params.processEnv
-       });
-       if (configuredBackend) {
--        const models = await probeModelsFromAcpBackend({ backend: configuredBackend, timeoutMs }).catch(() => null);
-+        const models = await probeModelsFromAcpBackend({ backend: configuredBackend, timeoutMs, modelConfig }).catch(() => null);
+@@ -73692,7 +73797,7 @@
+         const ownedBackend = configuredBackend;
+         params.onNativeCleanup?.(() => ownedBackend.dispose());
+         params.signal?.throwIfAborted();
+-        const models = await probeModelsFromAcpBackend({ backend: configuredBackend, timeoutMs, modelConfigOptionId: modelConfig.acpModelConfigOptionId }).catch(() => null);
++        const models = await probeModelsFromAcpBackend({ backend: configuredBackend, timeoutMs, modelConfig, signal: params.signal }).catch(() => null);
          if (models) {
            const res = { ...fallback, availableModels: models, source: "dynamic", observedAt: Date.now() };
            if (!usesProviderOwnedCache) {
-@@ -56166,7 +56233,7 @@ async function probeAgentModelsBestEffort(params) {
-         ...probeBackendOptions
-       });
-       backend = created.backend;
--      const models = await probeModelsFromAcpBackend({ backend, timeoutMs }).catch(() => null);
-+      const models = await probeModelsFromAcpBackend({ backend, timeoutMs, modelConfig }).catch(() => null);
+@@ -73809,7 +73914,7 @@
+       const ownedBackend = backend;
+       params.onNativeCleanup?.(() => ownedBackend.dispose());
+       params.signal?.throwIfAborted();
+-      const models = await probeModelsFromAcpBackend({ backend, timeoutMs, modelConfigOptionId: modelConfig.acpModelConfigOptionId }).catch(() => null);
++      const models = await probeModelsFromAcpBackend({ backend, timeoutMs, modelConfig, signal: params.signal }).catch(() => null);
        if (!models) {
          return failedResult();
        }
-diff --git a/package-dist/withMcpTimeout-C290k59A.mjs b/package-dist/withMcpTimeout-C290k59A.mjs
-index 58d03b9..9eb5e32 100644
---- a/package-dist/withMcpTimeout-C290k59A.mjs
-+++ b/package-dist/withMcpTimeout-C290k59A.mjs
-@@ -28512,6 +28512,8 @@ const AGENT_MODEL_CONFIG = Object.freeze({
+--- a/package-dist/withMcpTimeout-B6xGJAfL.mjs
++++ b/package-dist/withMcpTimeout-B6xGJAfL.mjs
+@@ -2233,6 +2233,7 @@
      supportsSelection: true,
      nonAcpApplyScope: "next_prompt",
      acpModelConfigOptionId: "model",
-+    // Reasoning effort levels differ per model, and Copilot silently ignores unsupported levels.
 +    acpModelOptionsScope: "per_model",
      defaultMode: "default",
      allowedModes: ["default"]

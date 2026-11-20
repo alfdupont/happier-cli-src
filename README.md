@@ -25,10 +25,7 @@ This private fork patches the release tree in `prepare()` before installing it:
   reasoning-effort choice for GitHub Copilot models. Its header explains the
   bug and the backported fix.
 
-The patch edits bundled `package-dist` chunks whose file names are content
-hashes, so it only applies to 0.2.14. When bumping `pkgver`, port it to the
-new chunks, or drop it once upstream ships the fix. `--fuzz=0` makes the build
-fail instead of patching the wrong code.
+The patch edits bundled `package-dist` chunks whose file names are content hashes, so it currently applies to 0.2.20. When bumping `pkgver`, port it to the new chunks or drop it once upstream ships the fix. `--fuzz=0` makes the build fail instead of patching the wrong code.
 
 After installing, restart the daemon so it loads the patched code:
 
@@ -42,19 +39,16 @@ The `aur` remote points at the public AUR package. Don't push this fork there.
 
 When upstream releases a new version:
 
-1. Update `pkgver`, checksums, or packaging logic in `PKGBUILD`.
-2. Regenerate `.SRCINFO`.
-3. Commit the changes.
-4. Push to GitHub and AUR.
+1. Update `pkgver`, release checksums, and packaging logic in `PKGBUILD`.
+2. Port or remove release-specific local patches and update their checksums.
+3. Regenerate `.SRCINFO` and build the package locally for inspection.
+4. Keep this private fork local; do not publish it to the public AUR.
 
 Commands:
 
 ```bash
 makepkg --printsrcinfo > .SRCINFO
-git add PKGBUILD .SRCINFO
-git commit -m "Update to <version>"
-git push origin master
-git push aur master
+makepkg -f
 ```
 
 ## Local Build
@@ -76,4 +70,4 @@ paru -U ./*.pkg.tar.zst
 
 - Do not commit built artifacts like `*.pkg.tar.zst`.
 - Do not upload package archives to AUR. AUR only stores packaging metadata.
-- If `PKGBUILD` changes, regenerate `.SRCINFO` before pushing.
+- If `PKGBUILD` changes, regenerate `.SRCINFO` and inspect the built package locally.

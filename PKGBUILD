@@ -1,6 +1,6 @@
 # Maintainer: zhaole_lv
 pkgname=happier-cli
-pkgver=0.2.14
+pkgver=0.2.20
 pkgrel=1
 pkgdesc="Open-source companion for AI coding agents (Claude Code, Codex, OpenCode, etc.)"
 arch=('x86_64' 'aarch64')
@@ -21,13 +21,13 @@ _base="https://github.com/happier-dev/happier/releases/download/${_tag}"
 
 # Local patches, applied to the extracted release tree in prepare().
 source=('copilot-per-model-reasoning-effort.patch')
-sha256sums=('0714612ec345eb546acd8721169d966e7bd7a0bdc46908911256c2dd4723f892')
+sha256sums=('8ae18a890afea27cc95e347efd6ba7a5185db83fbc9b14db5149b598d87c547c')
 source_x86_64=(
     "${_base}/happier-v${pkgver}-linux-x64.tar.gz"
     "https://raw.githubusercontent.com/happier-dev/happier/cli-v${pkgver}/LICENCE"
 )
 sha256sums_x86_64=(
-    'b8b290abc8080362b3f518590adfb961246815e55850811c8b6a46a041acce45'
+    'cac890b90e53309afd5178332017b195071cf1e3dd373ac5d8524c2bb2c74b60'
     'e251d0448ef3ce023c20ebac9b90a7d8642b1434825838247d6e457668eb3e00'
 )
 source_aarch64=(
@@ -35,7 +35,7 @@ source_aarch64=(
     "https://raw.githubusercontent.com/happier-dev/happier/cli-v${pkgver}/LICENCE"
 )
 sha256sums_aarch64=(
-    'b1c39cfe96474b06adfd28caf91f5831b802c097c6848ebad80d1575493abc8f'
+    'b0f8afe3b6941f0e11a240b59fc15721da726ac16aad8f122c9a64515982f188'
     'e251d0448ef3ce023c20ebac9b90a7d8642b1434825838247d6e457668eb3e00'
 )
 

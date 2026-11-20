@@ -1,0 +1,120 @@
+Stop the session mode override synchronizer from retrying a failed override in a tight loop.
+
+When a Copilot session starts with an --agent-mode its catalog does not allow (for example
+https://agentclientprotocol.com/protocol/session-modes#autopilot), setSessionMode() fails on
+every attempt. The released synchronizer keeps the override pending and retries it on every
+metadata sync with no delay, so an idle session retries it about ten times per second and
+saturates the link with session sync traffic (see BUG-session-mode-override-retry-loop.md).
+
+This patch ports the fork's fix to the bundled CLI 0.2.20 package:
+- A definitive provider rejection settles the override, is logged once, and is cleared from
+  session metadata so later starts do not replay it, as the model override synchronizer does.
+- Other failures keep one immediate retry, then back off exponentially from 1 s to 60 s.
+- A newer override is applied at once, regardless of the backoff.
+
+Apply from the extracted release root with patch -p1 --fuzz=0. The content-addressed chunk
+name and hunks are specific to cli-v0.2.20.
+
+Adapted from the fork's apps/cli/src/agent/runtime/sessionModeOverrideSync.ts.
+
+--- a/package-dist/createAcpRuntime-DKq1SnV2.mjs
++++ b/package-dist/createAcpRuntime-DKq1SnV2.mjs
+@@ -63,23 +63,55 @@
+   });
+ }
+ 
++const SESSION_MODE_OVERRIDE_RETRY_BACKOFF_BASE_MS = 1e3;
++const SESSION_MODE_OVERRIDE_RETRY_BACKOFF_MAX_MS = 6e4;
+ function createSessionModeOverrideSynchronizer(params) {
++  const now = params.now ?? Date.now;
+   let session = params.session;
+   let lastAppliedUpdatedAt = 0;
+   let pending = null;
+   let applyingPromise = null;
+   let lastAttemptedUpdatedAt = 0;
+   let lastAttemptNumber = 0;
++  let retryNotBefore = 0;
++  let cleanupObligation = null;
++  let cleanupPromise = null;
++  const isSameCommand = (left, right) => left?.updatedAt === right.updatedAt && left.modeId === right.modeId;
++  const retryCleanup = () => {
++    if (cleanupPromise) return cleanupPromise;
++    const obligation = cleanupObligation;
++    if (!obligation || !session.updateMetadata) return Promise.resolve();
++    cleanupPromise = session.updateMetadata((metadata) => {
++      const current = computePendingSessionModeOverrideApplication({ metadata, lastAppliedUpdatedAt: 0 });
++      if (!isSameCommand(current, obligation)) return metadata;
++      return computeNextMetadataStringOverrideV1({
++        metadata,
++        overrideKey: "sessionModeOverrideV1",
++        valueKey: "modeId",
++        value: "",
++        updatedAt: obligation.updatedAt + 1
++      });
++    }).then(() => {
++      if (isSameCommand(cleanupObligation, obligation)) cleanupObligation = null;
++    }).catch(() => {
++      logger.debug("[SessionModeOverrideSync] Rejected session mode override cleanup failed; cleanup will retry on the next sync");
++    }).finally(() => {
++      cleanupPromise = null;
++    });
++    return cleanupPromise;
++  };
+   const applyPendingIfPossible = () => {
+     if (applyingPromise) return applyingPromise;
+     if (!pending) return Promise.resolve(true);
+     if (!params.isStarted()) return Promise.resolve(true);
+     const next = pending;
+-    const attempt = next.updatedAt === lastAttemptedUpdatedAt ? lastAttemptNumber + 1 : 1;
+     if (next.updatedAt <= lastAppliedUpdatedAt) {
+       pending = null;
+       return Promise.resolve(true);
+     }
++    const isRetry = next.updatedAt === lastAttemptedUpdatedAt;
++    if (isRetry && now() < retryNotBefore) return Promise.resolve(false);
++    const attempt = isRetry ? lastAttemptNumber + 1 : 1;
+     lastAttemptedUpdatedAt = next.updatedAt;
+     lastAttemptNumber = attempt;
+     logger.debug("[SessionModeOverrideSync] Applying session mode override", {
+@@ -90,9 +122,24 @@
+     const apply = next.modeId === "" ? params.runtime.clearSessionModeOverride?.() ?? Promise.resolve() : params.runtime.setSessionMode(next.modeId);
+     applyingPromise = apply.then(() => {
+       lastAppliedUpdatedAt = next.updatedAt;
++      retryNotBefore = 0;
+       if (pending && pending.updatedAt <= lastAppliedUpdatedAt) pending = null;
+       return true;
+-    }).catch(() => {
++    }).catch(async (error) => {
++      if (isDefinitiveSessionControlApplyError(error)) {
++        lastAppliedUpdatedAt = Math.max(lastAppliedUpdatedAt, next.updatedAt);
++        if (pending && pending.updatedAt <= next.updatedAt) pending = null;
++        logger.infoFile("[SessionModeOverrideSync] Provider rejected session mode override; not retrying", {
++          updatedAt: next.updatedAt,
++          attempt
++        });
++        if (next.modeId !== "") {
++          cleanupObligation = next;
++          await retryCleanup();
++        }
++        return false;
++      }
++      retryNotBefore = attempt === 1 ? 0 : now() + Math.min(SESSION_MODE_OVERRIDE_RETRY_BACKOFF_BASE_MS * 2 ** (attempt - 2), SESSION_MODE_OVERRIDE_RETRY_BACKOFF_MAX_MS);
+       logger.infoFile("[SessionModeOverrideSync] Failed to apply session mode override; will retry on next sync", {
+         updatedAt: next.updatedAt,
+         attempt
+@@ -107,6 +154,7 @@
+     return applyingPromise;
+   };
+   const syncFromMetadata = () => {
++    if (cleanupObligation) void retryCleanup();
+     const snapshot = session.getMetadataSnapshot();
+     const next = computePendingSessionModeOverrideApplication({
+       metadata: snapshot,
+@@ -123,6 +171,7 @@
+     }
+   };
+   const flushPendingAfterStartWithOutcome = async () => {
++    if (cleanupObligation) await retryCleanup();
+     if (applyingPromise) return await applyingPromise;
+     if (!pending) return true;
+     if (!params.isStarted()) return true;

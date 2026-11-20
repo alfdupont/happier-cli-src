@@ -24,8 +24,13 @@ This private fork patches the release tree in `prepare()` before installing it:
 - `copilot-per-model-reasoning-effort.patch`: lets the model picker offer a
   reasoning-effort choice for GitHub Copilot models. Its header explains the
   bug and the backported fix.
+- `session-mode-override-retry-backoff.patch`: stops a session mode override
+  the provider refuses (for example a Copilot `--agent-mode` outside its
+  allowed modes) from being retried on every metadata sync, which saturated
+  the link while the session was idle. See
+  `BUG-session-mode-override-retry-loop.md` for the investigation.
 
-The patch edits bundled `package-dist` chunks whose file names are content hashes, so it currently applies to 0.2.20. When bumping `pkgver`, port it to the new chunks or drop it once upstream ships the fix. `--fuzz=0` makes the build fail instead of patching the wrong code.
+The patches edit bundled `package-dist` chunks whose file names are content hashes, so they currently apply to 0.2.20. When bumping `pkgver`, port them to the new chunks or drop them once upstream ships the fixes. `--fuzz=0` makes the build fail instead of patching the wrong code.
 
 After installing, restart the daemon so it loads the patched code:
 

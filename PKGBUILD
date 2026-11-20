@@ -1,7 +1,7 @@
 # Maintainer: zhaole_lv
 pkgname=happier-cli
 pkgver=0.2.20
-pkgrel=1
+pkgrel=2
 pkgdesc="Open-source companion for AI coding agents (Claude Code, Codex, OpenCode, etc.)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/happier-dev/happier"
@@ -20,8 +20,14 @@ _tag="cli-v${pkgver}"
 _base="https://github.com/happier-dev/happier/releases/download/${_tag}"
 
 # Local patches, applied to the extracted release tree in prepare().
-source=('copilot-per-model-reasoning-effort.patch')
-sha256sums=('8ae18a890afea27cc95e347efd6ba7a5185db83fbc9b14db5149b598d87c547c')
+source=(
+    'copilot-per-model-reasoning-effort.patch'
+    'session-mode-override-retry-backoff.patch'
+)
+sha256sums=(
+    '8ae18a890afea27cc95e347efd6ba7a5185db83fbc9b14db5149b598d87c547c'
+    'e765f38d5a9609786482c2c111d522d004937a20e418d7b712b988bbb560d385'
+)
 source_x86_64=(
     "${_base}/happier-v${pkgver}-linux-x64.tar.gz"
     "https://raw.githubusercontent.com/happier-dev/happier/cli-v${pkgver}/LICENCE"
@@ -51,6 +57,12 @@ prepare() {
     # content hashes, so it must be ported to every new pkgver.
     patch --directory="${srcdir}/happier-v${pkgver}-linux-${_arch}" --forward \
         --strip=1 --fuzz=0 --input="${srcdir}/copilot-per-model-reasoning-effort.patch"
+
+    # Stop a failing session mode override from being retried on every metadata
+    # sync, which saturates the link while the session is idle. Like the patch
+    # above, it targets a content-hashed chunk and must be ported per pkgver.
+    patch --directory="${srcdir}/happier-v${pkgver}-linux-${_arch}" --forward \
+        --strip=1 --fuzz=0 --input="${srcdir}/session-mode-override-retry-backoff.patch"
 }
 
 package() {
